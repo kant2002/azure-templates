@@ -40,7 +40,7 @@ jobs:
 
   - ${{ parameters.beforeBuild }}
 
-  - task: DotNetCoreInstaller@0
+  - task: UseDotNet@2
     displayName: 'Use .NET Core sdk ${{ parameters.netsdk }}'
     inputs:
       version: ${{ parameters.netsdk }}
