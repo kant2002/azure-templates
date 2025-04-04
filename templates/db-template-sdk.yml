@@ -1,0 +1,57 @@
+parameters:
+  queueName: ''
+  netsdk: '8.0.404'
+  beforeBuild: []
+  afterBuild: []
+  variables:
+  
+jobs:
+- job: DB
+  pool:
+    name: ${{ parameters.queueName }}
+  variables:
+    ${{ insert }}: ${{ parameters.variables }}
+  steps:
+  - checkout: self
+    clean: true
+
+  - ${{ parameters.beforeBuild }}
+
+  - task: UseDotNet@2
+    displayName: 'Use .NET Core sdk ${{ parameters.netsdk }}'
+    inputs:
+      version: ${{ parameters.netsdk }}
+  
+  - task: DotNetCoreCLI@2
+    displayName: 'Build DB solution'
+    inputs:
+      projects: '$(RestoreBuildProjects)'
+      arguments: '--configuration $(BuildConfiguration)'
+      feedsToUse: 'select'
+      vstsFeed: 'aa74c061-e9a6-4b0e-b103-c9f085bf397c'
+  
+  - task: DotNetCoreCLI@2
+    displayName: Test
+    #enabled: ${{ parameters.testsEnabled }}
+    enabled: false
+    inputs:
+      command: test
+      projects: '$(TestProjects)'
+      arguments: '--configuration $(BuildConfiguration) /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura ${{ parameters.additionalTestArguments }}' 
+  
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(build.artifactstagingdirectory)/db'
+    inputs:
+      Contents: $(PublishFiles)
+      flattenFolders: true
+      TargetFolder: '$(build.artifactstagingdirectory)/db'
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: db'
+    inputs:
+      PathtoPublish: '$(build.artifactstagingdirectory)/db'
+      ArtifactName: db
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+
+  - ${{ parameters.afterBuild }}

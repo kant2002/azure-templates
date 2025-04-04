@@ -1,0 +1,103 @@
+parameters:
+- name: betaRelease
+  displayName: Beta Release?
+  type: boolean
+  default: false
+- name: prodRelease
+  displayName: Prod Release?
+  type: boolean
+  default: false
+
+trigger:
+  branches:
+    include:
+    - main
+    - release/*
+  paths:
+    include:
+    - .azure/web.yml
+    - ProjectName.Web/*
+    - Core/*
+pr:
+  branches:
+    include:
+    - main
+    - release/*
+  paths:
+    include:
+    - .azure/web.yml
+    - ProjectName.Web/*
+    - Core/*
+
+stages:
+- stage: Build
+  jobs:
+  - template: ./templates/dotnet-template.yml
+    parameters:
+      queueName: Default
+      coverageEnabled: false
+      coverageDirectory: ProjectName.Web
+      variables:
+        SkipCodeSign: true
+        BuildConfiguration: Release
+        RestoreBuildProjects: ProjectName.sln
+        TestProjects: ProjectName.sln
+  
+      publishTasks:
+        - task: DotNetCoreCLI@2
+          displayName: Publish
+          inputs:
+            command: publish
+            publishWebProjects: False
+            projects: ProjectName.Web/ProjectName.Web.csproj
+            arguments: '--configuration $(BuildConfiguration) --output $(build.artifactstagingdirectory) --self-contained'
+            zipAfterPublish: True
+          condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+- ${{ if eq(parameters.betaRelease, true) }}:
+  - stage: Deploy
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset'))
+    jobs:
+    - deployment: Staging
+      pool:
+        name: Default
+        demands: 
+        - agent.os -equals Windows_NT
+      variables:
+      - group: Staging
+      - name: WebsiteName
+        value: beta.projectname.clientname.com
+      - template: ./templates/deploy-variables-template.yml
+      - name: WebsitePhysicalPath
+        value: 'D:\sites\clientname\projectname\beta'
+      - name: ArtifactName
+        value: 'drop/ProjectName.Web.zip'
+      environment: 'Staging'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - template: ./templates/deploy-template.yml
+- ${{ if eq(parameters.prodRelease, true) }}:
+  - stage: Prod
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset'))
+    jobs:
+    - deployment: Prod
+      pool:
+        name: Default
+        demands: 
+        - agent.os -equals Windows_NT
+      variables:
+      - group: Prod
+      - name: WebsiteName
+        value: projectname.clientname.com
+      - template: ./templates/deploy-variables-template.yml
+      - name: WebsitePhysicalPath
+        value: 'D:\sites\clientname\projectname\prod'
+      - name: ArtifactName
+        value: 'drop/ProjectName.Web.zip'
+      environment: 'Prod'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - template: ./templates/deploy-template.yml

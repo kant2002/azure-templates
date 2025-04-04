@@ -1,0 +1,125 @@
+parameters:
+  queueName: ''
+  queueVm: ''
+  beforeBuild: []
+  afterBuild: []
+  afterRestore: []
+  beforeTest: []
+  customBuild: []
+  afterTest: []
+  variables:
+  publishTasks: []
+  persistCredentials: false
+  testsEnabled: true
+  coverageEnabled: true
+  coverageDirectory: ''
+  netsdk: '9.0.102'
+  nodejs: '10.x'
+  
+#resources:
+#- repositories: self
+
+jobs:
+- job: Build
+  
+  pool:
+      name: ${{ parameters.queueName }}
+      vmImage: ${{ parameters.queueVm }}
+  variables:
+    ${{ insert }}: ${{ parameters.variables }}
+
+  # Services definition here is purely workaround to play with technology.
+  # it is impractical have SQL Server docker startup for each build.
+  #services:
+  #  sqlserver: sqlserver
+  
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: ${{ parameters.persistCredentials }}
+
+  - ${{ parameters.beforeBuild }}
+
+  - task: DotNetCoreInstaller@0
+    displayName: 'Use .NET Core sdk ${{ parameters.netsdk }}'
+    inputs:
+      version: ${{ parameters.netsdk }}
+
+  - task: NodeTool@0
+    displayName: 'Use NodeJS ${{ parameters.nodejs }}'
+    inputs:
+      versionSpec: ${{ parameters.nodejs }}
+  
+  - task: DotNetCoreCLI@2
+    displayName: Restore local tools
+    enabled: false
+    inputs:
+      command: custom
+      custom: tool
+      arguments: restore
+
+  - task: DotNetCoreCLI@2
+    displayName: Restore
+    inputs:
+      command: restore
+      projects: '$(RestoreBuildProjects)'
+
+  - ${{ parameters.afterRestore }}
+  
+  - task: DotNetCoreCLI@2
+    displayName: Build
+    inputs:
+      projects: '$(RestoreBuildProjects)'
+      arguments: '--configuration $(BuildConfiguration)'
+
+  - ${{ parameters.customBuild }}
+  
+  - task: DotNetCoreCLI@2
+    displayName: Test
+    enabled: ${{ parameters.testsEnabled }}
+    inputs:
+      command: test
+      projects: '$(TestProjects)'
+      arguments: '--configuration $(BuildConfiguration) /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura ${{ parameters.additionalTestArguments }}' 
+
+  - ${{ parameters.afterTest }}
+
+  - task: DotNetCoreCLI@2
+    displayName: Generate PR Coverage Report
+    enabled: ${{ parameters.coverageEnabled }}
+    inputs:
+      command: custom
+      custom: reportgenerator
+      arguments: '-reports:$(System.DefaultWorkingDirectory)/**/coverage.cobertura.xml -reports:$(System.DefaultWorkingDirectory)/coverage/**/cobertura-coverage.xml -targetdir:$(System.DefaultWorkingDirectory)/coverage -reporttypes:Cobertura'
+      workingDirectory: ${{ parameters.coverageDirectory }}
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), in(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+
+  - task: DotNetCoreCLI@2
+    displayName: Generate Full Coverage Report
+    enabled: ${{ parameters.coverageEnabled }}
+    inputs:
+      command: custom
+      custom: reportgenerator
+      arguments: '-reports:$(System.DefaultWorkingDirectory)/**/coverage.cobertura.xml -reports:$(System.DefaultWorkingDirectory)/**/cobertura-coverage.xml -targetdir:$(System.DefaultWorkingDirectory)/coverage -reporttypes:HTMLInline;Cobertura'
+      workingDirectory: ${{ parameters.coverageDirectory }}
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+      
+  - task: PublishCodeCoverageResults@1
+    displayName: Publish coverage
+    enabled: ${{ parameters.coverageEnabled }}
+    inputs:
+      codeCoverageTool: cobertura
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/Cobertura.xml'
+      reportDirectory: '$(System.DefaultWorkingDirectory)/coverage/'
+  
+  - ${{ parameters.publishTasks }}
+    
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact'
+    inputs:
+      PathtoPublish: '$(build.artifactstagingdirectory)'
+      artifactName: drop
+      artifactType: Container
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+      
+  - ${{ parameters.afterBuild }}

@@ -1,0 +1,46 @@
+parameters:
+  queueName: ''
+  beforeBuild: []
+  afterBuild: []
+  publishTasks: []
+  nodejs: '10.x'
+  variables:
+  
+jobs:
+- job: Windows
+  pool:
+    name: ${{ parameters.queueName }}
+  variables:
+    ${{ insert }}: ${{ parameters.variables }}
+  steps:
+  - checkout: self
+    clean: true
+
+  - ${{ parameters.beforeBuild }}
+
+  - task: NodeTool@0
+    displayName: 'Use NodeJS ${{ parameters.nodejs }}'
+    inputs:
+      versionSpec: '${{ parameters.nodejs }}'
+
+  - task: npmAuthenticate@0
+    displayName: 'npm Authenticate server/.npmrc'
+    inputs:
+      workingFile: $(PackageFolder)/.npmrc
+  
+  - task: Npm@1
+    displayName: Install packages
+    inputs:
+      command: install
+      workingDir: '$(PackageFolder)'
+  
+  - task: Npm@1
+    displayName: Run build
+    inputs:
+      command: custom
+      customCommand: run build
+      workingDir: '$(PackageFolder)'
+  
+  - ${{ parameters.publishTasks }}
+
+  - ${{ parameters.afterBuild }}

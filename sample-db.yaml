@@ -1,0 +1,102 @@
+parameters:
+- name: stagingRelease
+  displayName: Deploy To Staging?
+  type: boolean
+  default: false
+- name: productionRelease
+  displayName: Deploy To Production?
+  type: boolean
+  default: false
+
+trigger:
+  branches:
+    include:
+    - main
+    - release/*
+  paths:
+    include:
+    - db/*
+    - .azure/db.yml
+
+stages:
+- stage: Build
+  jobs:
+  - template: ./templates/db-template-sdk.yml
+    parameters:
+      queueName: Default
+      variables:
+        SkipCodeSign: true
+        BuildConfiguration: Release
+        BuildPlatform: "any cpu"
+        RestoreBuildProjects: project-db.sln
+        TestProjects: project-db.sln
+        PublishFiles: |
+          **/*.dacpac
+          DB.Dockerfile
+- stage: Deploy
+  condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset'))
+  jobs:
+    - ${{ if eq(parameters.stagingRelease, true) }}:
+      - deployment: Staging
+        pool:
+          name: Deployment
+          demands: 
+          - agent.os -equals Windows_NT
+        variables:
+          - group: Staging
+          - name: TestingData
+            value: 1
+          - name: BlockOnPossibleDataLoss
+            value: ${{ parameters.blockOnDataLoss }}
+        environment: 'Staging'
+        strategy:
+          # default deployment strategy
+          runOnce:
+            deploy:
+              steps:
+              - download: current
+                artifact: db
+              - task: SqlDacpacDeploymentOnMachineGroup@0
+                displayName: 'SQL DB Deploy'
+                inputs:
+                  TaskType: 'dacpac'
+                  DacpacFile: '$(System.DefaultWorkingDirectory)/../db/project-db.dacpac'
+                  TargetMethod: 'server'
+                  ServerName: $(SqlServerName)
+                  DatabaseName: $(ProjectDatabaseName)
+                  AuthScheme: sqlServerAuthentication
+                  SqlUsername: sa
+                  SqlPassword: '$(SqlAdminPassword)'
+                  AdditionalArguments: '/v:TestData=$(TestingData) /p:BlockOnPossibleDataLoss=$(BlockOnPossibleDataLoss) /p:BackupDatabaseBeforeChanges=True'
+    - ${{ if eq(parameters.productionRelease, true) }}:
+      - deployment: Production
+        pool:
+          name: Deployment
+          demands: 
+          - agent.os -equals Windows_NT
+        variables:
+          - group: Production
+          - name: TestingData
+            value: 0
+          - name: BlockOnPossibleDataLoss
+            value: ${{ parameters.blockOnDataLoss }}
+        environment: 'Production'
+        strategy:
+          # default deployment strategy
+          runOnce:
+            deploy:
+              steps:
+              - download: current
+                artifact: db
+              - task: SqlDacpacDeploymentOnMachineGroup@0
+                displayName: 'SQL DB Deploy'
+                inputs:
+                  TaskType: 'dacpac'
+                  DacpacFile: '$(System.DefaultWorkingDirectory)/../db/project-db.dacpac'
+                  TargetMethod: 'server'
+                  ServerName: $(SqlServerName)
+                  DatabaseName: $(ProjectDatabaseName)
+                  AuthScheme: sqlServerAuthentication
+                  SqlUsername: sa
+                  SqlPassword: '$(SqlAdminPassword)'
+                  AdditionalArguments: '/v:TestData=$(TestingData) /p:BlockOnPossibleDataLoss=$(BlockOnPossibleDataLoss) /p:BackupDatabaseBeforeChanges=True'

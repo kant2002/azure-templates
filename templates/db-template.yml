@@ -1,0 +1,54 @@
+parameters:
+  queueName: ''
+  beforeBuild: []
+  afterBuild: []
+  variables:
+  
+jobs:
+- job: DB
+  pool:
+    name: ${{ parameters.queueName }}
+    demands: 
+    - msbuild
+    - visualstudio
+    - vstest
+  variables:
+    ${{ insert }}: ${{ parameters.variables }}
+  steps:
+  - checkout: self
+    clean: true
+
+  - ${{ parameters.beforeBuild }}
+  
+  - task: VSBuild@1
+    displayName: 'Build DB solution'
+    inputs:
+      solution: '$(RestoreBuildProjects)'
+      platform: '$(BuildPlatform)'
+      configuration: '$(BuildConfiguration)'
+  
+  - task: VSTest@2
+    displayName: 'VsTest - testAssemblies'
+    inputs:
+      testAssemblyVer2: |
+       **\$(BuildConfiguration)\*test*.dll
+       !**\obj\**
+      platform: '$(BuildPlatform)'
+      configuration: '$(BuildConfiguration)'
+  
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(build.artifactstagingdirectory)/db'
+    inputs:
+      Contents: $(PublishFiles)
+      flattenFolders: true
+      TargetFolder: '$(build.artifactstagingdirectory)/db'
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: db'
+    inputs:
+      PathtoPublish: '$(build.artifactstagingdirectory)/db'
+      ArtifactName: db
+    condition: and(succeeded(), eq(variables['system.pullrequest.isfork'], false), notIn(variables['Build.Reason'], 'PullRequest', 'CheckInShelveset')) 
+
+  - ${{ parameters.afterBuild }}
